@@ -1,4 +1,4 @@
-from flask import flask
+from Flask import Flask
 from threading import Thread
 
 at = Flask('')
