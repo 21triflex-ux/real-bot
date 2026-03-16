@@ -169,21 +169,21 @@ async def leaderboard(ctx):
 classes = ["Light","Medium","Heavy"]
 
 weapons = {
-"Light":["V9S","XP-54","M11","Throwing Knives","Dagger","LH1","SR-84","SH1900","Sword","KS-23","93R"],
-"Medium":["AKM","FCAR","Model 1887","R.357","Riot Shield","Cerberus 12GA","Pike-556","Dual Blades"],
-"Heavy":["Lewis Gun","SA1216","Flamethrower","M60","Sledgehammer","Sledge","CHAOS","Slug shotgun"]
+"Light":["V9S","XP-54","M11","Throwing Knives","Dagger","LH1","SR-84","Sword","93R","RECRUVE BOW","M26 MATTER],
+"Medium":["AKM","FCAR","Model 1887","R.357","Riot Shield","Cerberus 12GA","Pike-556","Dual Blades","CL-40","CB-01","P90","FMAS"],
+"Heavy":["Lewis Gun","SA1216","Flamethrower","M60","Sledgehammer","KS-23","Slug shotgun","Titan","Spear","50's","Shak","Mini Gun"]
 }
 
 abilities = {
 "Light":["Grapple Hook","Dash","Cloaking Device"],
-"Medium":["Healing Beam","Jump Pad","Defibrillator","Turret"],
-"Heavy":["Charge 'N' Slam","Mesh Shield","RPG-7","Dome Shield"]
+"Medium":["Healing Beam","Dematerializer","Turret"],
+"Heavy":["Charge 'N' Slam","Mesh Shield","Cum Gun","Winch Claw"]
 }
 
 gadgets=[
-"Frag Grenade","Gas Mine","Pyro Grenade","Flashbang","Sonar Grenade",
-"Concussion Grenade","Breach Charge","Thermal Bore","Gas Grenade",
-"Glitch Grenade","Smoke Grenade","Dynamite","Explosive Mine"
+"Frag Grenade","Gas Mine","Pyro Grenade","Flashbang","Sonar Grenade","Jump Pad","Defib","APS Turret","Breach Drill","Proxy Sensor","Dome Shield","Anti-Grav"
+"Concussion Grenade","Breach Charge","Thermal Bore","Gas Grenade","Gate Way","ZipLine","Glitch Trap","Barricade","LockBolt","RPG","Healing Emitter",
+"Glitch Grenade","Smoke Grenade","Dynamite","Explosive Mine,"Goo Grenade","Gravity Vortex","Tracking Dart","H+ Infuser","Vanishing Bomb"
 ]
 
 @bot.command()
@@ -228,7 +228,7 @@ def calculate_score(hand):
 
     score=sum(hand)
 
-    while 11 in hand and score>21:
+    while 11 in hand and score>22:
         hand[hand.index(11)]=1
         score=sum(hand)
 
