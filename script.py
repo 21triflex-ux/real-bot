@@ -189,8 +189,8 @@ gadgets=[
 @bot.command()
 async def roll(ctx):
 
-    if ctx.channel.name != "commenter-june":
-        await ctx.send("❌ You can only use `$roll` in #commenter-june!")
+    if ctx.channel.name != "🤤commentor-june":
+        await ctx.send("❌ You can only use `$roll` in 🤤commentor-june!")
         return
 
     selected_class=random.choice(classes)
