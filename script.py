@@ -78,9 +78,6 @@ async def on_ready():
 
 # Economy & daily commands
 @bot.command()
-async def hello(ctx): await ctx.send(f"Hello {ctx.author.mention}!")
-
-@bot.command()
 async def daily(ctx):
     uid=str(ctx.author.id); ensure_user(uid)
     now=datetime.utcnow(); last=user_data[uid]["last_daily"]
@@ -260,29 +257,27 @@ async def bjstart(ctx):
     del active_games[cid]
     await ctx.send("🏁 Blackjack round finished!")
 
-# New: Blackjack stats leaderboard
+# Personalized blackjack stats
 @bot.command()
-async def bjstatsboard(ctx):
-    if not user_data: return await ctx.send("No data yet.")
-    stats_list=[]
-    for uid,d in user_data.items():
-        s=d.get("stats",{})
-        total = s.get("total_blackjack_games",0)
-        wins = s.get("blackjack_wins",0)
-        losses = s.get("blackjack_losses",0)
-        cp_earned = s.get("cp_earned",0)
-        cp_lost = s.get("cp_lost",0)
-        win_pct = round((wins/total)*100,1) if total>0 else 0
-        stats_list.append((uid,wins,losses,total,win_pct,cp_earned,cp_lost))
+async def bjstats(ctx):
+    uid = str(ctx.author.id)
+    ensure_user(uid)
+    s = user_data[uid]["stats"]
+    total = s.get("total_blackjack_games", 0)
+    wins = s.get("blackjack_wins", 0)
+    losses = s.get("blackjack_losses", 0)
+    cp_earned = s.get("cp_earned", 0)
+    cp_lost = s.get("cp_lost", 0)
+    win_pct = round((wins / total) * 100, 1) if total > 0 else 0
 
-    stats_list.sort(key=lambda x: (x[4],x[1]),reverse=True)
-    top10 = stats_list[:10]
-    embed = discord.Embed(title="♠️ Blackjack Stats Leaderboard",color=discord.Color.purple())
-    for i,(uid,wins,losses,total,win_pct,cp_earned,cp_lost) in enumerate(top10,start=1):
-        u=bot.get_user(int(uid)) or await bot.fetch_user(int(uid))
-        embed.add_field(name=f"{i}. {u.name}",
-                        value=f"🎲 Wins: {wins}\n❌ Losses: {losses}\n📊 Win %: {win_pct}%\n💰 CP Earned: {cp_earned}\n💸 CP Lost: {cp_lost}",
-                        inline=False)
+    embed = discord.Embed(title=f"♠️ {ctx.author.name}'s Blackjack Stats", color=discord.Color.purple())
+    embed.add_field(name="🎲 Wins", value=wins, inline=True)
+    embed.add_field(name="❌ Losses", value=losses, inline=True)
+    embed.add_field(name="📊 Win %", value=f"{win_pct}%", inline=True)
+    embed.add_field(name="💰 CP Earned", value=cp_earned, inline=True)
+    embed.add_field(name="💸 CP Lost", value=cp_lost, inline=True)
+    embed.add_field(name="🎮 Total Games", value=total, inline=True)
+
     await ctx.send(embed=embed)
 
 webserver.keep_alive()
