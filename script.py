@@ -181,7 +181,7 @@ abilities = {
 }
 
 gadgets=[
-"Frag Grenade","Gas Mine","Pyro Grenade","Flashbang","Sonar Grenade","Jump Pad","Defib","APS Turret","Breach Drill","Proxy Sensor","Dome Shield","Anti-Grav"
+"Frag Grenade","Gas Mine","Pyro Grenade","Flashbang","Sonar Grenade","Jump Pad","Defib","APS Turret","Breach Drill","Proxy Sensor","Dome Shield","Anti-Grav",
 "Concussion Grenade","Breach Charge","Thermal Bore","Gas Grenade","Gate Way","ZipLine","Glitch Trap","Barricade","LockBolt","RPG","Healing Emitter",
 "Glitch Grenade","Smoke Grenade","Dynamite","Explosive Mine","Goo Grenade","Gravity Vortex","Tracking Dart","H+ Infuser","Vanishing Bomb"
 ]
@@ -225,14 +225,14 @@ def deal_card():
     return random.choice(cards)
 
 def calculate_score(hand):
-
     score=sum(hand)
 
-    while 11 in hand and score>22:
+    while 11 in hand and score>21:
         hand[hand.index(11)]=1
         score=sum(hand)
 
     return score
+
 
 @bot.command()
 async def bjjoin(ctx,bet:int):
@@ -280,13 +280,9 @@ async def bjjoin(ctx,bet:int):
 
     game["turn_order"].append(user_id)
 
-    await ctx.send(
-        f"{ctx.author.mention} joined blackjack with {bet} CP"
-    )
+    await ctx.send(f"{ctx.author.mention} joined blackjack with {bet} CP")
 
-# -------------------------
-# Start Blackjack
-# -------------------------
+
 @bot.command()
 async def bjstart(ctx):
 
@@ -301,28 +297,41 @@ async def bjstart(ctx):
         return
 
     game=active_games[channel_id]
-
     dealer_hand=game["dealer_hand"]
 
-    await ctx.send(
-        f"Dealer shows: [{dealer_hand[0]}, ?]"
-    )
+    await ctx.send(f"Dealer shows: [{dealer_hand[0]}, ?]")
 
     for user_id in game["turn_order"]:
 
-        player=await bot.fetch_user(int(user_id))
+        player_id=user_id.split("_")[0]
+        player=await bot.fetch_user(int(player_id))
+
         pdata=game["players"][user_id]
 
         while not pdata["finished"]:
 
             total=calculate_score(pdata["hand"])
 
-            await ctx.send(
-                f"{player.mention} hand: {pdata['hand']} ({total})\nType hit or stand"
+            can_split = (
+                len(pdata["hand"])==2 and
+                pdata["hand"][0]==pdata["hand"][1] and
+                "_" not in user_id
             )
 
+            if can_split:
+                await ctx.send(
+                    f"{player.mention} hand: {pdata['hand']} ({total})\nType hit, stand, or split"
+                )
+            else:
+                await ctx.send(
+                    f"{player.mention} hand: {pdata['hand']} ({total})\nType hit or stand"
+                )
+
             def check(m):
-                return m.author.id==int(user_id) and m.content.lower() in ["hit","stand"]
+                return (
+                    m.author.id==int(player_id) and
+                    m.content.lower() in ["hit","stand","split"]
+                )
 
             try:
                 msg=await bot.wait_for("message",check=check,timeout=60)
@@ -330,17 +339,43 @@ async def bjstart(ctx):
                 pdata["finished"]=True
                 break
 
-            if msg.content.lower()=="hit":
+            action=msg.content.lower()
+
+            if action=="split" and can_split:
+
+                card=pdata["hand"][0]
+
+                hand1=[card,deal_card()]
+                hand2=[card,deal_card()]
+
+                pdata["hand"]=hand1
+
+                split_id=user_id+"_split"
+
+                game["players"][split_id]={
+                    "hand":hand2,
+                    "bet":pdata["bet"],
+                    "finished":False
+                }
+
+                index=game["turn_order"].index(user_id)
+                game["turn_order"].insert(index+1,split_id)
+
+                await ctx.send(f"{player.mention} split their hand!")
+                continue
+
+            if action=="hit":
 
                 pdata["hand"].append(deal_card())
                 total=calculate_score(pdata["hand"])
 
                 if total>21:
-                    await ctx.send(f"{player.mention} busted")
+                    await ctx.send(f"{player.mention} busted with {pdata['hand']}")
                     pdata["finished"]=True
 
-            else:
+            if action=="stand":
                 pdata["finished"]=True
+
 
     dealer_total=calculate_score(dealer_hand)
 
@@ -348,30 +383,32 @@ async def bjstart(ctx):
         dealer_hand.append(deal_card())
         dealer_total=calculate_score(dealer_hand)
 
+        if dealer_total==21:
+            await ctx.send("🃏 Dealer hit 21!")
+            break
+
     await ctx.send(f"Dealer hand: {dealer_hand} ({dealer_total})")
 
     for user_id,pdata in game["players"].items():
 
-        player=await bot.fetch_user(int(user_id))
+        player_id=user_id.split("_")[0]
+        player=await bot.fetch_user(int(player_id))
+
         player_total=calculate_score(pdata["hand"])
         bet=pdata["bet"]
 
         if player_total>21:
-
             await ctx.send(f"{player.mention} busted and lost {bet} CP")
 
         elif dealer_total>21 or player_total>dealer_total:
-
-            user_data[user_id]["cp"]+=bet*2
+            user_data[player_id]["cp"]+=bet*2
             await ctx.send(f"{player.mention} wins {bet*2} CP")
 
         elif player_total<dealer_total:
-
             await ctx.send(f"{player.mention} loses")
 
         else:
-
-            user_data[user_id]["cp"]+=bet
+            user_data[player_id]["cp"]+=bet
             await ctx.send(f"{player.mention} push (bet returned)")
 
     save_data()
