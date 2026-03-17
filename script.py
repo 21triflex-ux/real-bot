@@ -183,7 +183,7 @@ abilities = {
 gadgets=[
 "Frag Grenade","Gas Mine","Pyro Grenade","Flashbang","Sonar Grenade","Jump Pad","Defib","APS Turret","Breach Drill","Proxy Sensor","Dome Shield","Anti-Grav"
 "Concussion Grenade","Breach Charge","Thermal Bore","Gas Grenade","Gate Way","ZipLine","Glitch Trap","Barricade","LockBolt","RPG","Healing Emitter",
-"Glitch Grenade","Smoke Grenade","Dynamite","Explosive Mine,"Goo Grenade","Gravity Vortex","Tracking Dart","H+ Infuser","Vanishing Bomb"
+"Glitch Grenade","Smoke Grenade","Dynamite","Explosive Mine","Goo Grenade","Gravity Vortex","Tracking Dart","H+ Infuser","Vanishing Bomb"
 ]
 
 @bot.command()
