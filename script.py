@@ -1,4 +1,4 @@
-import discord,logging,os,random,asyncio,json,webserver
+import discord,logging,os,random,json,webserver
 from discord.ext import commands
 from datetime import datetime,timedelta
 
@@ -67,17 +67,6 @@ async def on_ready():
     build_deck()
     print(f"Bot ready as {bot.user.name}")
 
-@bot.event
-async def on_member_join(member):
-    await member.send(f"Welcome {member.name}! Glad to have you here.")
-
-@bot.event
-async def on_message(message):
-    if message.author==bot.user:return
-    if "call rommel a jew" in message.content.lower():
-        await message.channel.send("Let's keep things respectful 👍")
-    await bot.process_commands(message)
-
 @bot.command()
 async def hello(ctx):await ctx.send(f"Hello {ctx.author.mention}!")
 
@@ -101,12 +90,6 @@ async def balance(ctx):
     await ctx.send(f"{ctx.author.mention} has {user_data[uid]['cp']} CP")
 
 @bot.command()
-async def bal(ctx,member:discord.Member=None):
-    if member is None:member=ctx.author
-    uid=str(member.id);ensure_user(uid)
-    await ctx.send(f"{member.mention} has {user_data[uid]['cp']} CP")
-
-@bot.command()
 async def pay(ctx,member:discord.Member,amount:int):
     sender=str(ctx.author.id);receiver=str(member.id)
     ensure_user(sender);ensure_user(receiver)
@@ -114,14 +97,11 @@ async def pay(ctx,member:discord.Member,amount:int):
     if user_data[sender]["cp"]<amount:return await ctx.send("Not enough CP")
     user_data[sender]["cp"]-=amount
     user_data[receiver]["cp"]+=amount
-    user_data[sender]["stats"]["cp_sent"]+=amount
-    user_data[receiver]["stats"]["cp_received"]+=amount
     save_data()
     await ctx.send(f"💸 {ctx.author.mention} sent {amount} CP to {member.mention}")
 
 @bot.command()
 async def leaderboard(ctx):
-    if not user_data:return await ctx.send("No data yet")
     top=sorted(user_data.items(),key=lambda x:x[1]["cp"],reverse=True)[:10]
     e=discord.Embed(title="🏆 CP Leaderboard",color=discord.Color.gold())
     for i,(uid,d) in enumerate(top,start=1):
@@ -129,29 +109,14 @@ async def leaderboard(ctx):
         e.add_field(name=f"{i}. {u.name}",value=f"{d['cp']} CP",inline=False)
     await ctx.send(embed=e)
 
-@bot.command()
-async def stats(ctx,member:discord.Member=None):
-    if member is None:member=ctx.author
-    uid=str(member.id);ensure_user(uid);s=user_data[uid]["stats"]
-    e=discord.Embed(title=f"📈 {member.name}'s Casino Stats",color=discord.Color.green())
-    e.add_field(name="💰 CP",value=user_data[uid]["cp"],inline=False)
-    e.add_field(name="🎲 Daily Claims",value=s["daily_claims"])
-    e.add_field(name="♠️ Wins",value=s["blackjack_wins"])
-    e.add_field(name="♠️ Losses",value=s["blackjack_losses"])
-    e.add_field(name="♠️ Pushes",value=s["blackjack_pushes"])
-    e.add_field(name="🎮 Total Games",value=s["total_blackjack_games"])
-    e.add_field(name="📤 CP Sent",value=s["cp_sent"])
-    e.add_field(name="📥 CP Received",value=s["cp_received"])
-    await ctx.send(embed=e)
-
 classes=["Light","Medium","Heavy"]
-weapons={"Light":["V9S","XP-54","M11","Throwing Knives","Dagger","LH1","SR-84","Sword"],
-"Medium":["AKM","FCAR","Model 1887","R.357","Riot Shield","P90"],
-"Heavy":["Lewis Gun","SA1216","Flamethrower","M60","Sledgehammer"]}
+weapons={"Light":["V9S","XP-54","M11","Throwing Knives","Dagger"],
+"Medium":["AKM","FCAR","Model 1887","R.357","P90"],
+"Heavy":["Lewis Gun","SA1216","Flamethrower","M60"]}
 abilities={"Light":["Grapple Hook","Dash","Cloaking Device"],
 "Medium":["Healing Beam","Dematerializer","Turret"],
 "Heavy":["Charge 'N' Slam","Mesh Shield","Winch Claw"]}
-gadgets=["Frag Grenade","Gas Mine","Flashbang","Sonar Grenade","Jump Pad","Defib","APS Turret","ZipLine","Smoke Grenade","Dynamite"]
+gadgets=["Frag Grenade","Gas Mine","Flashbang","Sonar Grenade","Jump Pad","Defib","APS Turret","ZipLine"]
 
 @bot.command()
 async def roll(ctx):
@@ -169,6 +134,7 @@ class BlackjackView(discord.ui.View):
     def __init__(self,ctx,pid,pdata,game):
         super().__init__(timeout=60)
         self.pid=pid;self.pdata=pdata;self.game=game
+
     async def interaction_check(self,i):return i.user.id==int(self.pid)
 
     async def on_timeout(self):
@@ -203,74 +169,96 @@ class BlackjackView(discord.ui.View):
         self.stop()
         await i.response.send_message(f"Double → {format_hand(self.pdata['hand'])}")
 
+    @discord.ui.button(label="Split",style=discord.ButtonStyle.gray)
+    async def split(self,i,b):
+        uid=str(i.user.id)
+        if len(self.pdata["hand"])!=2:return await i.response.send_message("Need 2 cards.",ephemeral=True)
+        if self.pdata["hand"][0][0]!=self.pdata["hand"][1][0]:
+            return await i.response.send_message("Cards must match.",ephemeral=True)
+        if user_data[uid]["cp"]<self.pdata["bet"]:
+            return await i.response.send_message("Not enough CP.",ephemeral=True)
+
+        user_data[uid]["cp"]-=self.pdata["bet"]
+        card=self.pdata["hand"][0]
+        h1=[card,deal_card()]
+        h2=[card,deal_card()]
+        self.pdata["hand"]=h1
+
+        sid=self.pid+"_split"
+        self.game["players"][sid]={"hand":h2,"bet":self.pdata["bet"],"finished":False}
+
+        idx=self.game["turn_order"].index(self.pid)
+        self.game["turn_order"].insert(idx+1,sid)
+
+        self.stop()
+        await i.response.send_message(f"✂️ Split!\nHand1: {format_hand(h1)}\nHand2: {format_hand(h2)}")
+
 @bot.command()
 async def bjjoin(ctx,bet:int):
     uid=str(ctx.author.id);ensure_user(uid)
     if bet<=0:return await ctx.send("Bet must be >0")
     if user_data[uid]["cp"]<bet:return await ctx.send("Not enough CP")
+
     cid=ctx.channel.id
-    if cid not in active_games:active_games[cid]={"players":{},"dealer_hand":[deal_card(),deal_card()],"turn_order":[]}
+    if cid not in active_games:
+        active_games[cid]={"players":{},"dealer_hand":[deal_card(),deal_card()],"turn_order":[]}
+
     game=active_games[cid]
     user_data[uid]["cp"]-=bet
     game["players"][uid]={"hand":[deal_card(),deal_card()],"bet":bet,"finished":False}
     game["turn_order"].append(uid)
+
     await ctx.send(f"{ctx.author.mention} joined blackjack with {bet} CP")
 
 @bot.command()
 async def bjstart(ctx):
     cid=ctx.channel.id
     if cid not in active_games:return await ctx.send("No players joined")
-    game=active_games[cid];dealer=game["dealer_hand"]
+
+    game=active_games[cid]
+    dealer=game["dealer_hand"]
 
     await ctx.send(f"Dealer shows {dealer[0][0]}{dealer[0][1]} ?")
 
     for uid in game["turn_order"]:
-        pid=uid;pl=await bot.fetch_user(int(pid));p=game["players"][uid]
+        pid=uid.split("_")[0]
+        pl=await bot.fetch_user(int(pid))
+        p=game["players"][uid]
+
         while not p["finished"]:
             t=calculate_score(p["hand"])
-            if t==21 and len(p["hand"])==2:
-                win=int(p["bet"]*2.5)
-                user_data[pid]["cp"]+=win
-                user_data[pid]["stats"]["blackjack_wins"]+=1
-                user_data[pid]["stats"]["total_blackjack_games"]+=1
-                await ctx.send(f"🃏 {pl.mention} BLACKJACK wins {win} CP")
-                p["finished"]=True
-                break
             v=BlackjackView(ctx,pid,p,game)
             await ctx.send(f"{pl.mention} {format_hand(p['hand'])} ({t})",view=v)
             await v.wait()
 
     dt=calculate_score(dealer)
     while dt<17:dealer.append(deal_card());dt=calculate_score(dealer)
+
     await ctx.send(f"Dealer {format_hand(dealer)} ({dt})")
 
     for uid,p in game["players"].items():
-        pid=uid;pl=await bot.fetch_user(int(pid))
+        pid=uid.split("_")[0]
+        pl=await bot.fetch_user(int(pid))
         pt=calculate_score(p["hand"]);bet=p["bet"]
-        user_data[pid]["stats"]["total_blackjack_games"]+=1
 
         if pt>21:
-            user_data[pid]["stats"]["blackjack_losses"]+=1
-            await ctx.send(f"❌ {pl.mention} busted and loses {bet} CP")
+            await ctx.send(f"❌ {pl.mention} LOST {bet} CP (bust)")
 
         elif dt>21 or pt>dt:
             win=bet*2
             user_data[pid]["cp"]+=win
-            user_data[pid]["stats"]["blackjack_wins"]+=1
-            await ctx.send(f"💰 {pl.mention} wins {win} CP")
+            await ctx.send(f"💰 {pl.mention} WON {win} CP")
 
         elif pt<dt:
-            user_data[pid]["stats"]["blackjack_losses"]+=1
-            await ctx.send(f"❌ {pl.mention} loses {bet} CP")
+            await ctx.send(f"❌ {pl.mention} LOST {bet} CP")
 
         else:
             user_data[pid]["cp"]+=bet
-            user_data[pid]["stats"]["blackjack_pushes"]+=1
-            await ctx.send(f"🤝 {pl.mention} pushes and gets {bet} CP back")
+            await ctx.send(f"🤝 {pl.mention} PUSHED and got {bet} CP back")
 
     save_data()
     del active_games[cid]
-    await ctx.send("🃏 Round complete! Use `$bjjoin <bet>` to play again.")
+    await ctx.send("🏁 Blackjack round finished!")
 
 webserver.keep_alive()
 bot.run(token,log_handler=handler,log_level=logging.DEBUG)
