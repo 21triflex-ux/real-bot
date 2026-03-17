@@ -77,7 +77,7 @@ def build_deck():
 
 def deal_card():
     global deck
-    if len(deck) < 20:  # realistic reshuffle threshold
+    if len(deck) < 20:
         build_deck()
     return deck.pop()
 
@@ -245,6 +245,7 @@ class BlackjackView(discord.ui.View):
         if t > 21:
             self.pdata["finished"] = True
             self.stop()
+            self.pdata["outcome"] = ("bust", self.pdata["bet"])
             await i.response.send_message(f"💥 BUST {format_hand(self.pdata['hand'])} ({t})")
             return
         await i.response.send_message(f"{format_hand(self.pdata['hand'])} ({t})")
@@ -276,7 +277,7 @@ class BlackjackView(discord.ui.View):
         h2 = [c, deal_card()]
         self.pdata["hand"] = h1
         sid = self.pid + "_split"
-        self.game["players"][sid] = {"hand": h2, "bet": self.pdata["bet"], "finished": False}
+        self.game["players"][sid] = {"hand": h2, "bet": self.pdata["bet"], "finished": False, "outcome": None}
         idx = self.game["turn_order"].index(self.pid)
         self.game["turn_order"].insert(idx+1, sid)
         await i.response.send_message("Split")
@@ -295,7 +296,7 @@ async def bjjoin(ctx, bet: int):
         active_games[cid] = {"players": {}, "dealer_hand": [deal_card(), deal_card()], "turn_order": []}
     game = active_games[cid]
     user_data[uid]["cp"] -= bet
-    game["players"][uid] = {"hand": [deal_card(), deal_card()], "bet": bet, "finished": False}
+    game["players"][uid] = {"hand": [deal_card(), deal_card()], "bet": bet, "finished": False, "outcome": None}
     game["turn_order"].append(uid)
     await ctx.send(f"{ctx.author.mention} joined blackjack with {bet} CP")
 
@@ -308,25 +309,30 @@ async def bjstart(ctx):
     dealer = game["dealer_hand"]
     await ctx.send(f"Dealer shows {dealer[0][0]}{dealer[0][1]} ?")
 
+    # Player turns
     for uid in game["turn_order"]:
         pid = uid.split("_")[0]
         pl = await bot.fetch_user(int(pid))
         p = game["players"][uid]
+        score = calculate_score(p["hand"])
+        # Check natural blackjack
+        if score == 21 and len(p["hand"])==2:
+            win = int(p["bet"]*2.5)
+            user_data[pid]["cp"] += win
+            user_data[pid]["stats"]["blackjack_wins"] += 1
+            user_data[pid]["stats"]["cp_earned"] += int(p["bet"]*1.5)
+            user_data[pid]["stats"]["total_blackjack_games"] += 1
+            p["finished"] = True
+            p["outcome"] = ("blackjack", win)
+            await ctx.send(f"🃏 {pl.mention} BLACKJACK! You win {win} CP")
+            continue
+
         while not p["finished"]:
-            t = calculate_score(p["hand"])
-            if t == 21 and len(p["hand"])==2:
-                win = int(p["bet"] * 2.5)
-                user_data[pid]["cp"] += win
-                user_data[pid]["stats"]["blackjack_wins"] += 1
-                user_data[pid]["stats"]["cp_earned"] += int(p["bet"]*1.5)
-                user_data[pid]["stats"]["total_blackjack_games"] += 1
-                await ctx.send(f"🃏 {pl.mention} BLACKJACK! You win {win} CP")
-                p["finished"] = True
-                break
             v = BlackjackView(ctx, pid, p, game)
-            await ctx.send(f"{pl.mention} {format_hand(p['hand'])} ({t})", view=v)
+            await ctx.send(f"{pl.mention} {format_hand(p['hand'])} ({calculate_score(p['hand'])})", view=v)
             await v.wait()
 
+    # Dealer plays
     dealer_score = calculate_score(dealer)
     while dealer_score < 17:
         dealer.append(deal_card())
@@ -337,14 +343,14 @@ async def bjstart(ctx):
     for uid, p in game["players"].items():
         pid = uid.split("_")[0]
         pl = await bot.fetch_user(int(pid))
+        if p.get("outcome"):
+            continue  # already handled blackjack or bust
         player_score = calculate_score(p["hand"])
         bet = p["bet"]
         if player_score > 21:
             user_data[pid]["stats"]["blackjack_losses"] += 1
             user_data[pid]["stats"]["cp_lost"] += bet
             await ctx.send(f"❌ {pl.mention} busted and loses {bet} CP")
-        elif player_score == 21 and len(p["hand"])==2:
-            continue  # already handled blackjack payout
         elif dealer_score > 21 or player_score > dealer_score:
             user_data[pid]["cp"] += bet*2
             user_data[pid]["stats"]["blackjack_wins"] += 1
@@ -358,8 +364,7 @@ async def bjstart(ctx):
             user_data[pid]["cp"] += bet
             user_data[pid]["stats"]["blackjack_pushes"] += 1
             await ctx.send(f"🤝 {pl.mention} pushes and gets {bet} CP back")
-        if player_score !=21 or len(p["hand"])!=2:
-            user_data[pid]["stats"]["total_blackjack_games"] += 1
+        user_data[pid]["stats"]["total_blackjack_games"] += 1
 
     save_data()
     del active_games[cid]
