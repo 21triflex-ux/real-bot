@@ -1,554 +1,252 @@
-import discord
+import discord,logging,os,random,asyncio,json,webserver
 from discord.ext import commands
-import logging, os, random, asyncio, json
-from datetime import datetime, timedelta
+from datetime import datetime,timedelta
 
-# Bot setup
-token = os.getenv("DISCORD_TOKEN")
-if not token:
-    raise ValueError("DISCORD_TOKEN environment variable not set!")
+token=os.getenv("DISCORD_TOKEN")
+if not token:raise ValueError("DISCORD_TOKEN environment variable not set!")
 
-handler = logging.FileHandler(filename='discord.log', encoding='utf-8', mode='w')
-intents = discord.Intents.default()
-intents.message_content = True
-bot = commands.Bot(command_prefix='$', intents=intents)
+handler=logging.FileHandler(filename='discord.log',encoding='utf-8',mode='w')
+intents=discord.Intents.default();intents.message_content=True;intents.members=True
+bot=commands.Bot(command_prefix='$',intents=intents)
 
-# User data
-DATA_FILE = 'user_data.json'
+DATA_FILE='user_data.json'
 try:
     if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, 'r') as f:
-            user_data = json.load(f)
+        with open(DATA_FILE,'r') as f:
+            user_data=json.load(f)
             for uid in user_data:
                 if user_data[uid]["last_daily"]:
-                    user_data[uid]["last_daily"] = datetime.fromisoformat(user_data[uid]["last_daily"])
-    else:
-        user_data = {}
-except:
-    user_data = {}
+                    user_data[uid]["last_daily"]=datetime.fromisoformat(user_data[uid]["last_daily"])
+    else:user_data={}
+except:user_data={}
 
 def save_data():
-    d = {}
-    for uid, data in user_data.items():
-        d[uid] = {
-            "cp": data["cp"],
-            "last_daily": data["last_daily"].isoformat() if data["last_daily"] else None,
-            "stats": data.get("stats", {
-                "blackjack_wins": 0,
-                "blackjack_losses": 0,
-                "blackjack_pushes": 0,
-                "total_blackjack_games": 0,
-                "daily_claims": 0,
-                "cp_sent": 0,
-                "cp_received": 0,
-                "cp_earned": 0,
-                "cp_lost": 0
-            })
-        }
-    with open(DATA_FILE, 'w') as f:
-        json.dump(d, f, indent=4)
+    d={}
+    for uid,data in user_data.items():
+        d[uid]={"cp":data["cp"],
+               "last_daily":data["last_daily"].isoformat() if data["last_daily"] else None,
+               "stats":data.get("stats",{"blackjack_wins":0,"blackjack_losses":0,"blackjack_pushes":0,"total_blackjack_games":0,"daily_claims":0,"cp_sent":0,"cp_received":0})}
+    with open(DATA_FILE,'w') as f:json.dump(d,f,indent=4)
 
-def ensure_user(uid):
-    if uid not in user_data:
-        user_data[uid] = {
-            "cp": 0,
-            "last_daily": None,
-            "stats": {
-                "blackjack_wins": 0,
-                "blackjack_losses": 0,
-                "blackjack_pushes": 0,
-                "total_blackjack_games": 0,
-                "daily_claims": 0,
-                "cp_sent": 0,
-                "cp_received": 0,
-                "cp_earned": 0,
-                "cp_lost": 0
-            }
-        }
-
-# Deck setup
-suits = ["♠", "♥", "♦", "♣"]
-ranks = ["A","2","3","4","5","6","7","8","9","10","J","Q","K"]
-NUM_DECKS = 6
-deck = []
-
+suits=["♠","♥","♦","♣"];ranks=["A","2","3","4","5","6","7","8","9","10","J","Q","K"];deck=[]
 def build_deck():
     global deck
-    deck = [(r,s) for _ in range(NUM_DECKS) for s in suits for r in ranks]
-    random.shuffle(deck)
-
+    deck=[(r,s) for s in suits for r in ranks];random.shuffle(deck)
 def deal_card():
     global deck
-    if len(deck) < 20:
-        build_deck()
+    if not deck:build_deck()
     return deck.pop()
-
 def card_value(c):
-    r = c[0]
-    if r in ["J","Q","K"]:
-        return 10
-    if r == "A":
-        return 11
+    r=c[0]
+    if r in["J","Q","K"]:return 10
+    if r=="A":return 11
     return int(r)
-
 def calculate_score(hand):
-    score = sum(card_value(c) for c in hand)
-    aces = sum(1 for c in hand if c[0]=="A")
-    while score > 21 and aces:
-        score -= 10
-        aces -= 1
+    score=sum(card_value(c) for c in hand);aces=sum(1 for c in hand if c[0]=="A")
+    while score>21 and aces:score-=10;aces-=1
     return score
+def format_hand(hand):return" ".join([f"{r}{s}" for r,s in hand])
 
-def format_hand(hand):
-    return " ".join([f"{r}{s}" for r,s in hand])
-
-# Events
 @bot.event
 async def on_ready():
     build_deck()
     print(f"Bot ready as {bot.user.name}")
 
-# Economy commands
+@bot.event
+async def on_member_join(member):
+    await member.send(f"Welcome {member.name}! Glad to have you here.")
+
+@bot.event
+async def on_message(message):
+    if message.author==bot.user:return
+    if "call rommel a jew" in message.content.lower():
+        await message.channel.send("Let's keep things respectful 👍")
+    await bot.process_commands(message)
+
 @bot.command()
-async def daily(ctx):
-    uid = str(ctx.author.id)
-    ensure_user(uid)
-    now = datetime.utcnow()
-    last = user_data[uid]["last_daily"]
-    if last and now - last < timedelta(hours=24):
-        nxt = last + timedelta(hours=24)
-        return await ctx.send(f"❌ Next claim: {nxt.strftime('%H:%M UTC')}")
-    reward = random.randint(50,150)
-    user_data[uid]["cp"] += reward
-    user_data[uid]["last_daily"] = now
-    user_data[uid]["stats"]["daily_claims"] += 1
-    save_data()
-    await ctx.send(f"✅ {ctx.author.mention} claimed {reward} CP")
-
-# Blackjack game
-active_games = {}
-
-class BlackjackView(discord.ui.View):
-    def __init__(self, ctx, pid, pdata, game):
-        super().__init__(timeout=60)
-        self.ctx = ctx
-        self.pid = pid
-        self.pdata = pdata
-        self.game = game
-        self.msg = None
-
-    async def interaction_check(self, interaction):
-        return interaction.user.id == int(self.pid)
-
-    async def on_timeout(self):
-        self.pdata["finished"] = True
-        self.stop()
-        user = await bot.fetch_user(int(self.pid))
-        if self.msg:
-            await self.msg.edit(embed=self.build_embed(), view=None)
-        await self.ctx.send(f"⏰ {user.mention} timed out. Standing automatically.")
-
-    def build_embed(self):
-        embed = discord.Embed(title=f"🃏 Blackjack", color=discord.Color.green())
-        embed.add_field(name="Your Hand", value=f"{format_hand(self.pdata['hand'])} ({calculate_score(self.pdata['hand'])})", inline=False)
-        dealer_card = self.game['dealer_hand'][0]
-        embed.add_field(name="Dealer Showing", value=f"{dealer_card[0]}{dealer_card[1]} ?", inline=False)
-        embed.add_field(name="Bet", value=f"{self.pdata['bet']} CP", inline=False)
-        return embed
-
-    async def update_embed(self):
-        if self.msg:
-            await self.msg.edit(embed=self.build_embed(), view=self)
-
-    @discord.ui.button(label="Hit", style=discord.ButtonStyle.green)
-    async def hit(self, interaction, button):
-        self.pdata["hand"].append(deal_card())import discord
-from discord.ext import commands
-import logging, os, random, json
-from datetime import datetime, timedelta
-
-# Bot setup
-token = os.getenv("DISCORD_TOKEN")
-if not token:
-    raise ValueError("DISCORD_TOKEN environment variable not set!")
-
-handler = logging.FileHandler(filename='discord.log', encoding='utf-8', mode='w')
-intents = discord.Intents.default()
-intents.message_content = True
-bot = commands.Bot(command_prefix='$', intents=intents)
-
-# User data
-DATA_FILE = 'user_data.json'
-if os.path.exists(DATA_FILE):
-    with open(DATA_FILE, 'r') as f:
-        user_data = json.load(f)
-        for uid in user_data:
-            if user_data[uid]["last_daily"]:
-                user_data[uid]["last_daily"] = datetime.fromisoformat(user_data[uid]["last_daily"])
-else:
-    user_data = {}
-
-def save_data():
-    d = {}
-    for uid, data in user_data.items():
-        d[uid] = {
-            "cp": data["cp"],
-            "last_daily": data["last_daily"].isoformat() if data["last_daily"] else None,
-            "stats": data.get("stats", {
-                "blackjack_wins": 0,
-                "blackjack_losses": 0,
-                "blackjack_pushes": 0,
-                "total_blackjack_games": 0,
-                "daily_claims": 0,
-                "cp_sent": 0,
-                "cp_received": 0,
-                "cp_earned": 0,
-                "cp_lost": 0
-            })
-        }
-    with open(DATA_FILE, 'w') as f:
-        json.dump(d, f, indent=4)
+async def hello(ctx):await ctx.send(f"Hello {ctx.author.mention}!")
 
 def ensure_user(uid):
     if uid not in user_data:
-        user_data[uid] = {
-            "cp": 0,
-            "last_daily": None,
-            "stats": {
-                "blackjack_wins": 0,
-                "blackjack_losses": 0,
-                "blackjack_pushes": 0,
-                "total_blackjack_games": 0,
-                "daily_claims": 0,
-                "cp_sent": 0,
-                "cp_received": 0,
-                "cp_earned": 0,
-                "cp_lost": 0
-            }
-        }
+        user_data[uid]={"cp":0,"last_daily":None,"stats":{"blackjack_wins":0,"blackjack_losses":0,"blackjack_pushes":0,"total_blackjack_games":0,"daily_claims":0,"cp_sent":0,"cp_received":0}}
 
-# Deck setup
-suits = ["♠", "♥", "♦", "♣"]
-ranks = ["A","2","3","4","5","6","7","8","9","10","J","Q","K"]
-NUM_DECKS = 6
-deck = []
+@bot.command()
+async def daily(ctx):
+    uid=str(ctx.author.id);ensure_user(uid)
+    now=datetime.utcnow()
+    last=user_data[uid]["last_daily"]
+    if last and now-last<timedelta(hours=24):
+        nxt=last+timedelta(hours=24)
+        return await ctx.send(f"❌ Next claim: {nxt.strftime('%H:%M UTC')}")
+    reward=random.randint(50,150)
+    user_data[uid]["cp"]+=reward
+    user_data[uid]["last_daily"]=now
+    user_data[uid]["stats"]["daily_claims"]+=1
+    save_data()
+    await ctx.send(f"✅ {ctx.author.mention} claimed {reward} CP")
 
-def build_deck():
-    global deck
-    deck = [(r,s) for _ in range(NUM_DECKS) for s in suits for r in ranks]
-    random.shuffle(deck)
+@bot.command()
+async def balance(ctx):
+    uid=str(ctx.author.id);ensure_user(uid)
+    await ctx.send(f"{ctx.author.mention} has {user_data[uid]['cp']} CP")
 
-def deal_card():
-    global deck
-    if len(deck) < 20:
-        build_deck()
-    return deck.pop()
+@bot.command()
+async def bal(ctx, member:discord.Member=None):
+    if member is None: member=ctx.author
+    uid=str(member.id);ensure_user(uid)
+    await ctx.send(f"{member.mention} has {user_data[uid]['cp']} CP")
 
-def card_value(c):
-    r = c[0]
-    if r in ["J","Q","K"]: return 10
-    if r == "A": return 11
-    return int(r)
+@bot.command()
+async def pay(ctx, member:discord.Member, amount:int):
+    sender=str(ctx.author.id);receiver=str(member.id)
+    ensure_user(sender);ensure_user(receiver)
+    if amount<=0:return await ctx.send("Amount must be >0")
+    if user_data[sender]["cp"]<amount:return await ctx.send("Not enough CP")
+    user_data[sender]["cp"]-=amount
+    user_data[receiver]["cp"]+=amount
+    user_data[sender]["stats"]["cp_sent"]+=amount
+    user_data[receiver]["stats"]["cp_received"]+=amount
+    save_data()
+    await ctx.send(f"💸 {ctx.author.mention} sent {amount} CP to {member.mention}")
 
-def calculate_score(hand):
-    score = sum(card_value(c) for c in hand)
-    aces = sum(1 for c in hand if c[0]=="A")
-    while score > 21 and aces:
-        score -= 10
-        aces -= 1
-    return score
+@bot.command()
+async def leaderboard(ctx):
+    if not user_data:return await ctx.send("No data yet")
+    top=sorted(user_data.items(),key=lambda x:x[1]["cp"],reverse=True)[:10]
+    e=discord.Embed(title="🏆 CP Leaderboard",color=discord.Color.gold())
+    for i,(uid,d) in enumerate(top,start=1):
+        u=bot.get_user(int(uid)) or await bot.fetch_user(int(uid))
+        e.add_field(name=f"{i}. {u.name}",value=f"{d['cp']} CP",inline=False)
+    await ctx.send(embed=e)
 
-def format_hand(hand):
-    return " ".join([f"{r}{s}" for r,s in hand])
+@bot.command()
+async def stats(ctx, member: discord.Member = None):
+    if member is None: member = ctx.author
+    uid = str(member.id);ensure_user(uid)
+    s = user_data[uid]["stats"]
+    e = discord.Embed(title=f"📈 {member.name}'s Casino Stats", color=discord.Color.green())
+    e.add_field(name="💰 CP", value=user_data[uid]["cp"], inline=False)
+    e.add_field(name="🎲 Daily Claims", value=s["daily_claims"], inline=True)
+    e.add_field(name="♠️ Blackjack Wins", value=s["blackjack_wins"], inline=True)
+    e.add_field(name="♠️ Blackjack Losses", value=s["blackjack_losses"], inline=True)
+    e.add_field(name="♠️ Blackjack Pushes", value=s["blackjack_pushes"], inline=True)
+    e.add_field(name="🎮 Total Blackjack Games", value=s["total_blackjack_games"], inline=True)
+    e.add_field(name="📤 CP Sent", value=s["cp_sent"], inline=True)
+    e.add_field(name="📥 CP Received", value=s["cp_received"], inline=True)
+    await ctx.send(embed=e)
 
-# Blackjack
-active_games = {}
+classes=["Light","Medium","Heavy"]
+weapons={"Light":["V9S","XP-54","M11","Throwing Knives","Dagger","LH1","SR-84","Sword","93R","RECRUVE BOW","M26 MATTER"],
+"Medium":["AKM","FCAR","Model 1887","R.357","Riot Shield","Cerberus 12GA","Pike-556","Dual Blades","CL-40","CB-01","P90","FMAS"],
+"Heavy":["Lewis Gun","SA1216","Flamethrower","M60","Sledgehammer","KS-23","Slug shotgun","Titan","Spear","50's","Shak","Mini Gun"]}
+abilities={"Light":["Grapple Hook","Dash","Cloaking Device"],"Medium":["Healing Beam","Dematerializer","Turret"],
+"Heavy":["Charge 'N' Slam","Mesh Shield","Cum Gun","Winch Claw"]}
+gadgets=["Frag Grenade","Gas Mine","Pyro Grenade","Flashbang","Sonar Grenade","Jump Pad","Defib","APS Turret","Breach Drill","Proxy Sensor","Dome Shield","Anti-Grav",
+"Concussion Grenade","Breach Charge","Thermal Bore","Gas Grenade","Gate Way","ZipLine","Glitch Trap","Barricade","LockBolt","RPG","Healing Emitter",
+"Glitch Grenade","Smoke Grenade","Dynamite","Explosive Mine","Goo Grenade","Gravity Vortex","Tracking Dart","H+ Infuser","Vanishing Bomb"]
+
+@bot.command()
+async def roll(ctx):
+    if ctx.channel.name!="🤤commentor-june":return await ctx.send("Use in 🤤commentor-june")
+    c=random.choice(classes);w=random.choice(weapons[c]);a=random.choice(abilities[c]);g=random.sample(gadgets,3)
+    e=discord.Embed(title="🎲 Random Loadout",color=discord.Color.blue())
+    e.add_field(name="Class",value=c,inline=False)
+    e.add_field(name="Weapon",value=w,inline=False)
+    e.add_field(name="Ability",value=a,inline=False)
+    e.add_field(name="Gadgets",value="\n".join(g),inline=False)
+    await ctx.send(embed=e)
+
+active_games={}
 
 class BlackjackView(discord.ui.View):
-    def __init__(self, ctx, pid, pdata, game):
-        super().__init__(timeout=60)
-        self.ctx = ctx
-        self.pid = pid
-        self.pdata = pdata
-        self.game = game
-        self.msg = None
-
-    async def interaction_check(self, interaction):
-        return interaction.user.id == int(self.pid)
-
-    async def on_timeout(self):
-        self.pdata["finished"] = True
-        self.stop()
-        user = await self.ctx.bot.fetch_user(int(self.pid))
-        if self.msg:
-            await self.msg.edit(embed=self.build_embed(), view=None)
-        await self.ctx.send(f"⏰ {user.mention} timed out and stands automatically.")
-
-    def build_embed(self):
-        embed = discord.Embed(title="🃏 Blackjack", color=discord.Color.green())
-        embed.add_field(name="Your Hand", value=f"{format_hand(self.pdata['hand'])} ({calculate_score(self.pdata['hand'])})", inline=False)
-        dealer_card = self.game['dealer_hand'][0]
-        embed.add_field(name="Dealer Showing", value=f"{dealer_card[0]}{dealer_card[1]} ?", inline=False)
-        embed.add_field(name="Bet", value=f"{self.pdata['bet']} CP", inline=False)
-        return embed
-
-    async def update_embed(self):
-        if self.msg:
-            await self.msg.edit(embed=self.build_embed(), view=self)
-
-    @discord.ui.button(label="Hit", style=discord.ButtonStyle.green)
-    async def hit(self, interaction, button):
+    def __init__(self,ctx,pid,pdata,game):super().__init__(timeout=60);self.pid=pid;self.pdata=pdata;self.game=game
+    async def interaction_check(self,i):return i.user.id==int(self.pid)
+    @discord.ui.button(label="Hit",style=discord.ButtonStyle.green)
+    async def hit(self,i,b):
+        self.pdata["hand"].append(deal_card());t=calculate_score(self.pdata["hand"])
+        if t>21:await i.response.send_message(f"BUST {format_hand(self.pdata['hand'])} ({t})");self.pdata["finished"]=True;self.stop();return
+        await i.response.send_message(f"{format_hand(self.pdata['hand'])} ({t})")
+    @discord.ui.button(label="Stand",style=discord.ButtonStyle.red)
+    async def stand(self,i,b):
+        self.pdata["finished"]=True;await i.response.send_message("Stand");self.stop()
+    @discord.ui.button(label="Double",style=discord.ButtonStyle.blurple)
+    async def double(self,i,b):
+        uid=str(i.user.id)
+        if user_data[uid]["cp"]<self.pdata["bet"]:return await i.response.send_message("Not enough CP",ephemeral=True)
+        user_data[uid]["cp"]-=self.pdata["bet"];self.pdata["bet"]*=2
         self.pdata["hand"].append(deal_card())
-        score = calculate_score(self.pdata["hand"])
-        if score > 21:
-            self.pdata["finished"] = True
-            self.stop()
-            self.pdata["outcome"] = ("bust", self.pdata["bet"])
-            await self.update_embed()
-            await interaction.response.send_message(f"💥 BUST! {format_hand(self.pdata['hand'])} ({score})")
-        else:
-            await self.update_embed()
-            await interaction.response.defer()
-
-    @discord.ui.button(label="Stand", style=discord.ButtonStyle.red)
-    async def stand(self, interaction, button):
-        self.pdata["finished"] = True
-        self.stop()
-        await self.update_embed()
-        await interaction.response.defer()
-
-    @discord.ui.button(label="Double", style=discord.ButtonStyle.blurple)
-    async def double(self, interaction, button):
-        uid = str(interaction.user.id)
-        if user_data[uid]["cp"] < self.pdata["bet"]:
-            return await interaction.response.send_message("❌ Not enough CP to double", ephemeral=True)
-        user_data[uid]["cp"] -= self.pdata["bet"]
-        self.pdata["bet"] *= 2
-        self.pdata["hand"].append(deal_card())
-        self.pdata["finished"] = True
-        self.stop()
-        await self.update_embed()
-        await interaction.response.defer()
+        await i.response.send_message(f"Double → {format_hand(self.pdata['hand'])}")
+        self.pdata["finished"]=True;self.stop()
+    @discord.ui.button(label="Split",style=discord.ButtonStyle.gray)
+    async def split(self,i,b):
+        if len(self.pdata["hand"])!=2 or self.pdata["hand"][0][0]!=self.pdata["hand"][1][0]:
+            return await i.response.send_message("Cannot split",ephemeral=True)
+        c=self.pdata["hand"][0];h1=[c,deal_card()];h2=[c,deal_card()]
+        self.pdata["hand"]=h1
+        sid=self.pid+"_split"
+        self.game["players"][sid]={"hand":h2,"bet":self.pdata["bet"],"finished":False}
+        idx=self.game["turn_order"].index(self.pid);self.game["turn_order"].insert(idx+1,sid)
+        await i.response.send_message("Split");self.stop()
 
 @bot.command()
-async def bjjoin(ctx, bet: int):
-    uid = str(ctx.author.id)
-    ensure_user(uid)
-    if bet <= 0 or user_data[uid]["cp"] < bet:
-        return await ctx.send("❌ Invalid bet or not enough CP")
-    cid = ctx.channel.id
-    if cid not in active_games:
-        active_games[cid] = {"players": {}, "dealer_hand": [deal_card(), deal_card()], "turn_order": []}
-    game = active_games[cid]
-    user_data[uid]["cp"] -= bet
-    game["players"][uid] = {"hand": [deal_card(), deal_card()], "bet": bet, "finished": False, "outcome": None}
+async def bjjoin(ctx,bet:int):
+    if ctx.channel.name!="♠️gambling-table":return await ctx.send("Use in #♠️gambling-table")
+    uid=str(ctx.author.id);ensure_user(uid)
+    if bet<=0:return await ctx.send("Bet must be >0")
+    if user_data[uid]["cp"]<bet:return await ctx.send("Not enough CP")
+    cid=ctx.channel.id
+    if cid not in active_games:active_games[cid]={"players":{},"dealer_hand":[deal_card(),deal_card()],"turn_order":[]}
+    game=active_games[cid]
+    user_data[uid]["cp"]-=bet
+    game["players"][uid]={"hand":[deal_card(),deal_card()],"bet":bet,"finished":False}
     game["turn_order"].append(uid)
-    await ctx.send(f"✅ {ctx.author.mention} joined blackjack with {bet} CP")
+    await ctx.send(f"{ctx.author.mention} joined blackjack with {bet} CP")
 
 @bot.command()
 async def bjstart(ctx):
-    cid = ctx.channel.id
-    if cid not in active_games:
-        return await ctx.send("❌ No players joined")
-    game = active_games[cid]
-    dealer = game["dealer_hand"]
-    await ctx.send(f"🂠 Dealer shows: {dealer[0][0]}{dealer[0][1]} ?")
+    if ctx.channel.name!="♠️gambling-table":return await ctx.send("Use in #♠️gambling-table")
+    cid=ctx.channel.id
+    if cid not in active_games:return await ctx.send("No players joined")
+    game=active_games[cid];dealer=game["dealer_hand"];dt=calculate_score(dealer)
+
+    if dt==21:
+        await ctx.send(f"Dealer BLACKJACK {format_hand(dealer)}")
+        for uid,p in game["players"].items():
+            pid=uid.split("_")[0];pl=await bot.fetch_user(int(pid))
+            pt=calculate_score(p["hand"])
+            user_data[pid]["stats"]["total_blackjack_games"]+=1
+            if pt==21:user_data[pid]["cp"]+=p["bet"];user_data[pid]["stats"]["blackjack_pushes"]+=1;await ctx.send(f"{pl.mention} push")
+            else:user_data[pid]["stats"]["blackjack_losses"]+=1;await ctx.send(f"{pl.mention} loses")
+        del active_games[cid];save_data();return
+
+    await ctx.send(f"Dealer shows: {dealer[0][0]}{dealer[0][1]} ?")
 
     for uid in game["turn_order"]:
-        pid = uid.split("_")[0]
-        player = game["players"][uid]
-        pl_user = await bot.fetch_user(int(pid))
+        pid=uid.split("_")[0];pl=await bot.fetch_user(int(pid));p=game["players"][uid]
+        while not p["finished"]:
+            t=calculate_score(p["hand"])
+            if t==21 and len(p["hand"])==2:
+                win=int(p["bet"]*2.5);user_data[pid]["cp"]+=win
+                user_data[pid]["stats"]["blackjack_wins"]+=1
+                user_data[pid]["stats"]["total_blackjack_games"]+=1
+                await ctx.send(f"🃏 {pl.mention} BLACKJACK wins {win} CP")
+                p["finished"]=True;break
+            v=BlackjackView(ctx,pid,p,game)
+            await ctx.send(f"{pl.mention} {format_hand(p['hand'])} ({t})",view=v)
+            await v.wait()
 
-        # Natural blackjack
-        score = calculate_score(player["hand"])
-        if score == 21 and len(player["hand"]) == 2:
-            win = int(player["bet"] * 2.5)
-            user_data[pid]["cp"] += win
-            user_data[pid]["stats"]["blackjack_wins"] += 1
-            user_data[pid]["stats"]["cp_earned"] += int(player["bet"] * 1.5)
-            user_data[pid]["stats"]["total_blackjack_games"] += 1
-            player["finished"] = True
-            player["outcome"] = ("blackjack", win)
-            await ctx.send(f"🃏 {pl_user.mention} BLACKJACK! Wins {win} CP")
-            continue
+    dt=calculate_score(dealer)
+    while dt<17:dealer.append(deal_card());dt=calculate_score(dealer)
+    await ctx.send(f"Dealer {format_hand(dealer)} ({dt})")
 
-        embed = discord.Embed(title="🃏 Blackjack", color=discord.Color.green())
-        embed.add_field(name="Your Hand", value=f"{format_hand(player['hand'])} ({calculate_score(player['hand'])})", inline=False)
-        embed.add_field(name="Dealer Showing", value=f"{dealer[0][0]}{dealer[0][1]} ?", inline=False)
-        embed.add_field(name="Bet", value=f"{player['bet']} CP", inline=False)
-        msg = await ctx.send(f"{pl_user.mention} it's your turn!", embed=embed)
-        view = BlackjackView(ctx, pid, player, game)
-        view.msg = msg
-        await msg.edit(view=view)
-        await view.wait()
+    for uid,p in game["players"].items():
+        pid=uid.split("_")[0];pl=await bot.fetch_user(int(pid));pt=calculate_score(p["hand"]);bet=p["bet"]
+        if pt>21:user_data[pid]["stats"]["blackjack_losses"]+=1;user_data[pid]["stats"]["total_blackjack_games"]+=1;await ctx.send(f"{pl.mention} busted")
+        elif dt>21 or pt>dt:user_data[pid]["cp"]+=bet*2;user_data[pid]["stats"]["blackjack_wins"]+=1;user_data[pid]["stats"]["total_blackjack_games"]+=1;await ctx.send(f"{pl.mention} wins {bet*2}")
+        elif pt<dt:user_data[pid]["stats"]["blackjack_losses"]+=1;user_data[pid]["stats"]["total_blackjack_games"]+=1;await ctx.send(f"{pl.mention} loses")
+        else:user_data[pid]["cp"]+=bet;user_data[pid]["stats"]["blackjack_pushes"]+=1;user_data[pid]["stats"]["total_blackjack_games"]+=1;await ctx.send(f"{pl.mention} push")
 
-    # Dealer plays
-    dealer_score = calculate_score(dealer)
-    while dealer_score < 17:
-        dealer.append(deal_card())
-        dealer_score = calculate_score(dealer)
-    await ctx.send(f"🂠 Dealer's hand: {format_hand(dealer)} ({dealer_score})")
+    save_data();del active_games[cid];await ctx.send("🎉 Blackjack ended")
 
-    # Resolve
-    for uid, player in game["players"].items():
-        pid = uid.split("_")[0]
-        pl_user = await bot.fetch_user(int(pid))
-        bet = player["bet"]
-        p_score = calculate_score(player["hand"])
-        if player.get("outcome"): continue
-        if p_score > 21:
-            user_data[pid]["stats"]["blackjack_losses"] += 1
-            user_data[pid]["stats"]["cp_lost"] += bet
-            await ctx.send(f"❌ {pl_user.mention} busted, loses {bet} CP")
-        elif dealer_score > 21 or p_score > dealer_score:
-            user_data[pid]["cp"] += bet * 2
-            user_data[pid]["stats"]["blackjack_wins"] += 1
-            user_data[pid]["stats"]["cp_earned"] += bet
-            await ctx.send(f"💰 {pl_user.mention} wins {bet*2} CP")
-        elif p_score < dealer_score:
-            user_data[pid]["stats"]["blackjack_losses"] += 1
-            user_data[pid]["stats"]["cp_lost"] += bet
-            await ctx.send(f"❌ {pl_user.mention} loses {bet} CP")
-        else:
-            user_data[pid]["cp"] += bet
-            user_data[pid]["stats"]["blackjack_pushes"] += 1
-            await ctx.send(f"🤝 {pl_user.mention} pushes, gets {bet} CP back")
-        user_data[pid]["stats"]["total_blackjack_games"] += 1
-
-    save_data()
-    del active_games[cid]
-    await ctx.send("🏁 Blackjack round finished! Use `$bjjoin <bet>` to play again.")
-
-bot.run(token, log_handler=handler, log_level=logging.DEBUG)
-        score = calculate_score(self.pdata["hand"])
-        if score > 21:
-            self.pdata["finished"] = True
-            self.stop()
-            self.pdata["outcome"] = ("bust", self.pdata["bet"])
-            await self.update_embed()
-            await interaction.response.send_message(f"💥 BUST! {format_hand(self.pdata['hand'])} ({score})")
-        else:
-            await self.update_embed()
-            await interaction.response.defer()
-
-    @discord.ui.button(label="Stand", style=discord.ButtonStyle.red)
-    async def stand(self, interaction, button):
-        self.pdata["finished"] = True
-        self.stop()
-        await self.update_embed()
-        await interaction.response.defer()
-
-    @discord.ui.button(label="Double", style=discord.ButtonStyle.blurple)
-    async def double(self, interaction, button):
-        uid = str(interaction.user.id)
-        if user_data[uid]["cp"] < self.pdata["bet"]:
-            return await interaction.response.send_message("❌ Not enough CP to double", ephemeral=True)
-        user_data[uid]["cp"] -= self.pdata["bet"]
-        self.pdata["bet"] *= 2
-        self.pdata["hand"].append(deal_card())
-        self.pdata["finished"] = True
-        self.stop()
-        await self.update_embed()
-        await interaction.response.defer()
-
-@bot.command()
-async def bjjoin(ctx, bet: int):
-    uid = str(ctx.author.id)
-    ensure_user(uid)
-    if bet <= 0:
-        return await ctx.send("❌ Bet must be greater than 0")
-    if user_data[uid]["cp"] < bet:
-        return await ctx.send("❌ Not enough CP")
-    
-    cid = ctx.channel.id
-    if cid not in active_games:
-        active_games[cid] = {"players": {}, "dealer_hand": [deal_card(), deal_card()], "turn_order": []}
-    game = active_games[cid]
-
-    user_data[uid]["cp"] -= bet
-    game["players"][uid] = {"hand": [deal_card(), deal_card()], "bet": bet, "finished": False, "outcome": None}
-    game["turn_order"].append(uid)
-    await ctx.send(f"✅ {ctx.author.mention} joined blackjack with a bet of {bet} CP")
-
-@bot.command()
-async def bjstart(ctx):
-    cid = ctx.channel.id
-    if cid not in active_games:
-        return await ctx.send("❌ No players have joined yet")
-    
-    game = active_games[cid]
-    dealer = game["dealer_hand"]
-    await ctx.send(f"🂠 Dealer shows: {dealer[0][0]}{dealer[0][1]} ?")
-
-    # Player turns
-    for uid in game["turn_order"]:
-        pid = uid.split("_")[0]
-        player = game["players"][uid]
-        pl_user = await bot.fetch_user(int(pid))
-
-        # Check natural blackjack
-        score = calculate_score(player["hand"])
-        if score == 21 and len(player["hand"]) == 2:
-            win = int(player["bet"] * 2.5)
-            user_data[pid]["cp"] += win
-            user_data[pid]["stats"]["blackjack_wins"] += 1
-            user_data[pid]["stats"]["cp_earned"] += int(player["bet"] * 1.5)
-            user_data[pid]["stats"]["total_blackjack_games"] += 1
-            player["finished"] = True
-            player["outcome"] = ("blackjack", win)
-            await ctx.send(f"🃏 {pl_user.mention} got BLACKJACK! Wins {win} CP")
-            continue
-
-        # Interactive embed
-        embed = discord.Embed(title=f"🃏 Blackjack", color=discord.Color.green())
-        embed.add_field(name="Your Hand", value=f"{format_hand(player['hand'])} ({calculate_score(player['hand'])})", inline=False)
-        embed.add_field(name="Dealer Showing", value=f"{dealer[0][0]}{dealer[0][1]} ?", inline=False)
-        embed.add_field(name="Bet", value=f"{player['bet']} CP", inline=False)
-        msg = await ctx.send(f"{pl_user.mention} it's your turn!", embed=embed)
-        view = BlackjackView(ctx, pid, player, game)
-        view.msg = msg
-        await msg.edit(view=view)
-        await view.wait()
-
-    # Dealer plays
-    dealer_score = calculate_score(dealer)
-    while dealer_score < 17:
-        dealer.append(deal_card())
-        dealer_score = calculate_score(dealer)
-    await ctx.send(f"🂠 Dealer's hand: {format_hand(dealer)} ({dealer_score})")
-
-    # Resolve outcomes
-    for uid, player in game["players"].items():
-        pid = uid.split("_")[0]
-        pl_user = await bot.fetch_user(int(pid))
-        bet = player["bet"]
-        player_score = calculate_score(player["hand"])
-
-        if player.get("outcome"):
-            continue
-        if player_score > 21:
-            user_data[pid]["stats"]["blackjack_losses"] += 1
-            user_data[pid]["stats"]["cp_lost"] += bet
-            await ctx.send(f"❌ {pl_user.mention} busted and loses {bet} CP")
-        elif dealer_score > 21 or player_score > dealer_score:
-            user_data[pid]["cp"] += bet * 2
-            user_data[pid]["stats"]["blackjack_wins"] += 1
-            user_data[pid]["stats"]["cp_earned"] += bet
-            await ctx.send(f"💰 {pl_user.mention} wins {bet*2} CP")
-        elif player_score < dealer_score:
-            user_data[pid]["stats"]["blackjack_losses"] += 1
-            user_data[pid]["stats"]["cp_lost"] += bet
-            await ctx.send(f"❌ {pl_user.mention} loses {bet} CP")
-        else:
-            user_data[pid]["cp"] += bet
-            user_data[pid]["stats"]["blackjack_pushes"] += 1
-            await ctx.send(f"🤝 {pl_user.mention} pushes and gets {bet} CP back")
-
-        user_data[pid]["stats"]["total_blackjack_games"] += 1
-
-    save_data()
-    del active_games[cid]
-    await ctx.send("🏁 Blackjack round finished! Use `$bjjoin <bet>` to play again.")
-
-# Run bot
-bot.run(token, log_handler=handler, log_level=logging.DEBUG)
+webserver.keep_alive()
+bot.run(token,log_handler=handler,log_level=logging.DEBUG)
